@@ -14,6 +14,7 @@ import (
 	"github.com/pivotal/go-smtpd/smtpd"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -53,6 +54,17 @@ func NewJobSupervisor(
 	jobFailuresServerPort int,
 	reloadOptions ReloadOptions,
 ) (js jobSupervisor) {
+
+	go func() {
+		for {
+			err := CheckAndSync(fs, dirProvider.MonitJobsDir())
+			if err != nil {
+				logger.Debug("Check and sync", "Error syncronizing services")
+			}
+			time.Sleep(10 * time.Second)
+		}
+	}()
+
 	return jobSupervisor{
 		fs:          fs,
 		runner:      runner,
@@ -63,6 +75,29 @@ func NewJobSupervisor(
 
 		reloadOptions: reloadOptions,
 	}
+}
+
+var globalProcessLock *sync.Mutex = &sync.Mutex{}
+
+func CheckAndSync(fs boshsys.FileSystem, monitDir string) error {
+	globalProcessLock.Lock()
+	defer globalProcessLock.Unlock()
+	services, ok, errors := CheckJobConsistency(fs, monitDir)
+	if errors != nil {
+		return bosherr.New("Error checking and syncronizing jobs")
+	}
+	if ok == true {
+		return nil
+	}
+	if len(services) > 0 {
+		for _, servicename := range services {
+			err := RemoveService(servicename)
+			if err != nil {
+				return bosherr.WrapError(err, fmt.Sprintf("Error removing service %s", servicename))
+			}
+		}
+	}
+	return nil
 }
 
 func (js jobSupervisor) Reload() error {
