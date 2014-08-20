@@ -19,7 +19,7 @@ import (
 )
 
 const jobSupervisorLogTag = "jobSupervisor"
-const jobSupervisorPath = "C:\\sc_jobs\\jobs.xml"
+const jobSupervisorPath = "c:\\vcap\\monit\\jobs.xml"
 
 var serviceArguments = []string{}
 
@@ -95,12 +95,17 @@ func CheckAndSync(fs boshsys.FileSystem, monitDir string) error {
 			if err != nil {
 				return bosherr.WrapError(err, fmt.Sprintf("Error removing service %s", servicename))
 			}
+			err = RemoveFromJobList(fs, servicename)
+			if err != nil {
+				return bosherr.WrapError(err, fmt.Sprintf("Error removing service %s from job list", servicename))
+			}
 		}
 	}
 	return nil
 }
 
 func (js jobSupervisor) Reload() error {
+	js.Stop()
 
 	jobs, errs := GetJobs(js.fs, js.dirProvider.MonitJobsDir())
 	if errs != nil {
@@ -109,23 +114,12 @@ func (js jobSupervisor) Reload() error {
 	}
 	for counter := 0; counter < len(jobs); counter++ {
 		for _, service := range jobs[counter].Services {
-			preScript := service.PreStop
-			if _, err := os.Stat(preScript); os.IsNotExist(err) {
-				js.logger.Debug("Stop Service", "Pre-stop script does not exist for service", service.Name)
-			} else {
-				stdout, stderr, exitcode, err := js.runner.RunCommand(preScript)
-				js.logger.Debug("Stop Service", fmt.Sprintf("Pre-stop script output for service %s : %s", service.Name, stdout))
-				if err != nil || exitcode != 0 {
-					return bosherr.WrapError(err, fmt.Sprintf("Exit code: %d - Error output %s", exitcode, stderr))
-				}
-			}
-
 			err := RemoveService(service.Name)
 			if err != nil {
 				return bosherr.WrapError(err, fmt.Sprintf("Error removing service %s", service.Name))
 			}
 
-			preScript = service.PreStart
+			preScript := service.PreStart
 			if _, err := os.Stat(preScript); os.IsNotExist(err) {
 				js.logger.Debug("Starting Service", "Pre-start script does not exist for service", service.Name)
 			} else {
@@ -138,6 +132,10 @@ func (js jobSupervisor) Reload() error {
 
 		}
 
+	}
+	err := js.Start()
+	if err != nil {
+		return bosherr.WrapError(err, "Error starting services after reload")
 	}
 	return nil
 }
@@ -155,9 +153,7 @@ func (js jobSupervisor) Start() error {
 			name := service.Name
 			preScript := service.PreStart
 
-			if _, err := os.Stat(preScript); os.IsNotExist(err) {
-				js.logger.Debug("Start Service", "Pre-start script does not exist for service", name)
-			} else {
+			if len(preScript) > 0 {
 				stdout, stderr, exitcode, err := js.runner.RunCommand(preScript)
 				js.logger.Debug("Start Service", fmt.Sprintf("Pre-start script output for service %s : %s", name, stdout))
 				if err != nil || exitcode != 0 {
@@ -226,9 +222,7 @@ func (js jobSupervisor) Stop() error {
 			name := service.Name
 			preScript := service.PreStop
 
-			if _, err := os.Stat(preScript); os.IsNotExist(err) {
-				js.logger.Debug("Stop Service", "Pre-stop script does not exist for service", name)
-			} else {
+			if len(preScript) > 0 {
 				stdout, stderr, exitcode, err := js.runner.RunCommand(preScript)
 				js.logger.Debug("Stop Service", fmt.Sprintf("Pre-stop script output for service %s : %s", name, stdout))
 				if err != nil || exitcode != 0 {
@@ -362,14 +356,15 @@ func (js jobSupervisor) AddJob(jobName string, jobIndex int, configPath string) 
 }
 
 func (js jobSupervisor) RemoveAllJobs() error {
-	err := js.fs.RemoveAll(js.dirProvider.MonitJobsDir())
+	err := js.Stop()
+	if err != nil {
+		return bosherr.WrapError(err, "Error stoping services before removing jobs")
+	}
+	err = js.fs.RemoveAll(js.dirProvider.MonitJobsDir())
 
 	if err != nil {
 		return bosherr.WrapError(err, "Error removing all monitrc files")
 	}
-
-	bytes, _ := xml.Marshal(nil)
-	js.fs.WriteFile(jobSupervisorPath, bytes)
 
 	return nil
 }

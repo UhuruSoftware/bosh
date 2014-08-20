@@ -100,3 +100,33 @@ func contains(job_list []Job, service_to_check string) bool {
 	}
 	return false
 }
+
+func RemoveFromJobList(fs boshsys.FileSystem, name string) error {
+	stored_service_list := ReadJobs(fs)
+	services := removeFromServices(stored_service_list.ServiceNames, name)
+	stored_service_list.ServiceNames = services
+
+	output, err := xml.Marshal(stored_service_list)
+
+	if err != nil {
+		return err
+	}
+
+	err = fs.WriteFile(jobSupervisorPath, output)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func removeFromServices(services []string, name string) []string {
+	var result []string
+	for i, serviceName := range services {
+		if serviceName == name {
+			result = append(services[:i], services[(i+1):]...)
+			break
+		}
+	}
+	return result
+}
