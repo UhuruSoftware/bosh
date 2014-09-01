@@ -11,8 +11,7 @@ import (
 	"code.google.com/p/winsvc/svc"
 	"encoding/xml"
 	"fmt"
-	"github.com/pivotal/go-smtpd/smtpd"
-	"os"
+	//"github.com/pivotal/go-smtpd/smtpd"
 	"path/filepath"
 	"sync"
 	"time"
@@ -105,34 +104,35 @@ func CheckAndSync(fs boshsys.FileSystem, monitDir string) error {
 }
 
 func (js jobSupervisor) Reload() error {
+	js.logger.Debug(jobSupervisorLogTag, "Running Reload")
 	js.Stop()
 
+	js.logger.Debug(jobSupervisorLogTag, "Getting jobs")
 	jobs, errs := GetJobs(js.fs, js.dirProvider.MonitJobsDir())
 	if errs != nil {
-		js.logger.Debug("Reload", fmt.Sprintf("Errors from getting actual jobs %s", errs))
+		js.logger.Debug(jobSupervisorLogTag, fmt.Sprintf("Errors from getting actual jobs %s", errs))
 		return bosherr.WrapError(errs[0], "Error getting actual jobs")
 	}
 	for counter := 0; counter < len(jobs); counter++ {
 		for _, service := range jobs[counter].Services {
+			js.logger.Debug(jobSupervisorLogTag, fmt.Sprintf("Removing service %s", service.Name))
 			err := RemoveService(service.Name)
 			if err != nil {
 				return bosherr.WrapError(err, fmt.Sprintf("Error removing service %s", service.Name))
 			}
 
 			preScript := service.PreStart
-			if _, err := os.Stat(preScript); os.IsNotExist(err) {
-				js.logger.Debug("Starting Service", "Pre-start script does not exist for service", service.Name)
-			} else {
-				stdout, stderr, exitcode, err := js.runner.RunCommand(preScript)
-				js.logger.Debug("Starting Service", fmt.Sprintf("Pre-start script output for service %s : %s", service.Name, stdout))
-				if err != nil || exitcode != 0 {
-					return bosherr.WrapError(err, fmt.Sprintf("Exit code: %d - Error output %s", exitcode, stderr))
-				}
+			js.logger.Debug(jobSupervisorLogTag, fmt.Sprintf("Executing Pre Start %s", service.Name))
+			stdout, stderr, exitcode, err := js.runner.RunCommand(preScript)
+			js.logger.Debug("Starting Service", fmt.Sprintf("Pre-start script output for service %s : %s", service.Name, stdout))
+			if err != nil || exitcode != 0 {
+				return bosherr.WrapError(err, fmt.Sprintf("Exit code: %d - Error output %s", exitcode, stderr))
 			}
 
 		}
 
 	}
+	js.logger.Debug(jobSupervisorLogTag, "Starting services")
 	err := js.Start()
 	if err != nil {
 		return bosherr.WrapError(err, "Error starting services after reload")
@@ -141,9 +141,10 @@ func (js jobSupervisor) Reload() error {
 }
 
 func (js jobSupervisor) Start() error {
+	js.logger.Debug(jobSupervisorLogTag, "Running Start services")
 	jobs, errs := GetJobs(js.fs, js.dirProvider.MonitJobsDir())
 	if errs != nil {
-		js.logger.Debug("Start Service", fmt.Sprintf("Errors from getting actual jobs %s", errs))
+		js.logger.Debug(jobSupervisorLogTag, fmt.Sprintf("Errors from getting actual jobs %s", errs))
 		return bosherr.WrapError(errs[0], "Error getting actual jobs")
 	}
 
@@ -155,7 +156,7 @@ func (js jobSupervisor) Start() error {
 
 			if len(preScript) > 0 {
 				stdout, stderr, exitcode, err := js.runner.RunCommand(preScript)
-				js.logger.Debug("Start Service", fmt.Sprintf("Pre-start script output for service %s : %s", name, stdout))
+				js.logger.Debug(jobSupervisorLogTag, fmt.Sprintf("Pre-start script output for service %s : %s", name, stdout))
 				if err != nil || exitcode != 0 {
 					return bosherr.WrapError(err, fmt.Sprintf("Exit code: %d - Error output %s", exitcode, stderr))
 				}
@@ -173,10 +174,13 @@ func (js jobSupervisor) Start() error {
 			defer s.Close()
 			err = s.Start(serviceArguments)
 			if err != nil {
-				return bosherr.WrapError(err, "could not start service")
+				return bosherr.WrapError(err, "Could not start service")
 			}
 		}
-		js.resetStatus(jobs[counter].JobIndex, jobs[counter].JobName, "monitored")
+		err := js.resetStatus(jobs[counter].JobIndex, jobs[counter].JobName, "monitored")
+		if err != nil {
+			return bosherr.WrapError(err, "Could not reset status")
+		}
 
 	}
 
@@ -184,6 +188,7 @@ func (js jobSupervisor) Start() error {
 }
 
 func (js jobSupervisor) resetStatus(jobIndex int, jobName string, status string) error {
+	js.logger.Debug(jobSupervisorLogTag, "Reseting status")
 	targetFilename := fmt.Sprintf("%04d_%s.monitrc", jobIndex, jobName)
 	targetConfigPath := filepath.Join(js.dirProvider.MonitJobsDir(), targetFilename)
 
@@ -200,7 +205,7 @@ func (js jobSupervisor) resetStatus(jobIndex int, jobName string, status string)
 	}
 
 	outxml, err := xml.Marshal(jobinfo)
-
+	js.logger.Debug(jobSupervisorLogTag, fmt.Sprintf("Writing status %s to file %s", status, targetConfigPath))
 	err = js.fs.WriteFile(targetConfigPath, outxml)
 	if err != nil {
 		return err
@@ -210,9 +215,10 @@ func (js jobSupervisor) resetStatus(jobIndex int, jobName string, status string)
 }
 
 func (js jobSupervisor) Stop() error {
+	js.logger.Debug(jobSupervisorLogTag, "Stopping services")
 	jobs, errs := GetJobs(js.fs, js.dirProvider.MonitJobsDir())
 	if errs != nil {
-		js.logger.Debug("Stop Service", fmt.Sprintf("Errors from getting actual jobs %s", errs))
+		js.logger.Debug(jobSupervisorLogTag, fmt.Sprintf("Errors from getting actual jobs %s", errs))
 		return bosherr.WrapError(errs[0], "Error getting actual jobs")
 	}
 
@@ -224,7 +230,7 @@ func (js jobSupervisor) Stop() error {
 
 			if len(preScript) > 0 {
 				stdout, stderr, exitcode, err := js.runner.RunCommand(preScript)
-				js.logger.Debug("Stop Service", fmt.Sprintf("Pre-stop script output for service %s : %s", name, stdout))
+				js.logger.Debug(jobSupervisorLogTag, fmt.Sprintf("Pre-stop script output for service %s : %s", name, stdout))
 				if err != nil || exitcode != 0 {
 					return bosherr.WrapError(err, fmt.Sprintf("Exit code: %d - Error output %s", exitcode, stderr))
 				}
@@ -264,6 +270,7 @@ func (js jobSupervisor) Stop() error {
 
 //Desired implementation
 func (js jobSupervisor) Status() (status string) {
+	js.logger.Debug(jobSupervisorLogTag, "Status services")
 	jobs, errs := GetJobs(js.fs, js.dirProvider.MonitJobsDir())
 	if errs != nil {
 		js.logger.Debug("Status Service", fmt.Sprintf("Errors from getting actual jobs %s", errs))
@@ -295,6 +302,7 @@ func (js jobSupervisor) Status() (status string) {
 }
 
 func (js jobSupervisor) Unmonitor() error {
+	js.logger.Debug(jobSupervisorLogTag, "Unmonitor services")
 	jobs, errs := GetJobs(js.fs, js.dirProvider.MonitJobsDir())
 	if errs != nil {
 		js.logger.Debug("Unmonitor Service", fmt.Sprintf("Errors from getting actual jobs %s", errs))
@@ -308,6 +316,7 @@ func (js jobSupervisor) Unmonitor() error {
 }
 
 func (js jobSupervisor) AddJob(jobName string, jobIndex int, configPath string) error {
+	js.logger.Debug(jobSupervisorLogTag, fmt.Sprintf("Adding job %s %d", jobName, jobIndex))
 	targetFilename := fmt.Sprintf("%04d_%s.monitrc", jobIndex, jobName)
 	targetConfigPath := filepath.Join(js.dirProvider.MonitJobsDir(), targetFilename)
 	jobs_list := ReadJobs(js.fs)
@@ -356,6 +365,7 @@ func (js jobSupervisor) AddJob(jobName string, jobIndex int, configPath string) 
 }
 
 func (js jobSupervisor) RemoveAllJobs() error {
+	js.logger.Debug(jobSupervisorLogTag, "Removing all jobs")
 	err := js.Stop()
 	if err != nil {
 		return bosherr.WrapError(err, "Error stoping services before removing jobs")
@@ -369,24 +379,25 @@ func (js jobSupervisor) RemoveAllJobs() error {
 	return nil
 }
 
+//TODO implement this
 func (js jobSupervisor) MonitorJobFailures(handler JobFailureHandler) (err error) {
-	alertHandler := func(smtpd.Connection, smtpd.MailAddress) (env smtpd.Envelope, err error) {
-		//env = &alertEnvelope{
-		//	new(smtpd.BasicEnvelope),
-		//	handler,
-		//	new(boshalert.MonitAlert),
-		//}
-		return
-	}
+	//alertHandler := func(smtpd.Connection, smtpd.MailAddress) (env smtpd.Envelope, err error) {
+	//	//env = &alertEnvelope{
+	//	//	new(smtpd.BasicEnvelope),
+	//	//	handler,
+	//	//	new(boshalert.MonitAlert),
+	//	//}
+	//	return
+	//}
 
-	serv := &smtpd.Server{
-		Addr:      fmt.Sprintf(":%d", js.jobFailuresServerPort),
-		OnNewMail: alertHandler,
-	}
+	//serv := &smtpd.Server{
+	//	Addr:      fmt.Sprintf(":%d", js.jobFailuresServerPort),
+	//	OnNewMail: alertHandler,
+	//}
 
-	err = serv.ListenAndServe()
-	if err != nil {
-		err = bosherr.WrapError(err, "Listen for SMTP")
-	}
+	//err = serv.ListenAndServe()
+	//if err != nil {
+	//	err = bosherr.WrapError(err, "Listen for SMTP")
+	//}
 	return
 }

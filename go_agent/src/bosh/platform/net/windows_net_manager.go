@@ -1,8 +1,7 @@
 package net
 
 import (
-
-	//bosherr "bosh/errors"
+	bosherr "bosh/errors"
 	boshlog "bosh/logger"
 	bosharp "bosh/platform/net/arp"
 	boship "bosh/platform/net/ip"
@@ -50,65 +49,56 @@ func (net windowsNetManager) getDNSServers(networks boshsettings.Networks) []str
 }
 
 func (net windowsNetManager) SetupDhcp(networks boshsettings.Networks, errCh chan error) error {
-	var isError bool
 	for _, network := range networks {
-		err := net.SetupDHCP(network.Mac)
+		err := net.oleSetupDhcp(network.Mac)
 		if err != nil {
-			errCh <- err
+			return bosherr.WrapError(err, "setting dhcp")
 		}
-	}
-	if isError {
-		close(errCh)
 	}
 	return nil
 }
 
 func (net windowsNetManager) SetupManualNetworking(networks boshsettings.Networks, errCh chan error) error {
-	var isError bool
 	for _, network := range networks {
 		dns := strings.Join(network.DNS, ",")
-		err := net.SetupNetwork(network.Mac, network.IP, network.Netmask, network.Gateway, dns)
+		err := net.oleSetupNetwork(network.Mac, network.IP, network.Netmask, network.Gateway, dns)
 		if err != nil {
-			isError = true
-			errCh <- err
+			return bosherr.WrapError(err, "setting network")
 		}
-	}
-	if isError {
-		close(errCh)
 	}
 
 	return nil
 }
 
-func (net windowsNetManager) SetupNetwork(macaddress, ip, netmask, gateway, dns string) error {
+func (net windowsNetManager) oleSetupNetwork(macaddress, ip, netmask, gateway, dns string) error {
 
 	err := ole.CoInitializeEx(0, ole.COINIT_APARTMENTTHREADED)
 	defer ole.CoUninitialize()
 
 	if err != nil {
-		return err
+		return bosherr.WrapError(err, "Initialize OLE")
 	}
 
 	unknown1, err := oleutil.CreateObject("BoshUtilities.WindowsNetwork")
 	if err != nil {
-		return err
+		return bosherr.WrapError(err, "Create OLE Object")
 	}
 
 	cons1, err := unknown1.QueryInterface(ole.IID_IDispatch)
 	if err != nil {
-		return err
+		return bosherr.WrapError(err, "Query IDispatch interface")
 	}
 
 	_, err = oleutil.CallMethod(cons1, "SetupNetwork", macaddress, ip, netmask, gateway, dns)
 
 	if err != nil {
-		return err
+		return bosherr.WrapError(err, "Call method Setup Network")
 	}
 
 	return nil
 }
 
-func (net windowsNetManager) SetupDHCP(macaddress string) error {
+func (net windowsNetManager) oleSetupDhcp(macaddress string) error {
 
 	err := ole.CoInitializeEx(0, ole.COINIT_APARTMENTTHREADED)
 	defer ole.CoUninitialize()

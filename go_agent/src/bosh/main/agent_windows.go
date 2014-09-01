@@ -41,6 +41,27 @@ loop:
 	return
 }
 
+func redirectStdStreams() error {
+
+	stdoutFilePath := "c:\\vcap\\bosh\\agent\\logs\\stdout.log"
+	stdoutFile, err := os.OpenFile(stdoutFilePath, os.O_WRONLY|os.O_CREATE|os.O_APPEND|os.O_SYNC, 0660)
+	if err != nil {
+		return err
+	}
+	os.Stdout = stdoutFile
+
+	stderrFilePath := "c:\\vcap\\bosh\\agent\\logs\\stderr.log"
+
+	stderrFile, err := os.OpenFile(stderrFilePath, os.O_WRONLY|os.O_CREATE|os.O_APPEND|os.O_SYNC, 0660)
+	if err != nil {
+		return err
+	}
+
+	os.Stderr = stderrFile
+
+	return nil
+}
+
 func main() {
 
 	if contains(os.Args, "console") {
@@ -48,8 +69,7 @@ func main() {
 	} else {
 		var err error
 		//setting stdout and stderr
-		os.Stdout, err = os.Create("c:\\vcap\\bosh\\agent\\logs\\stdout.log")
-		os.Stderr, err = os.Create("c:\\vcap\\bosh\\agent\\logs\\stderr.log")
+		err = redirectStdStreams()
 		if err != nil {
 			panic(err.Error())
 		}

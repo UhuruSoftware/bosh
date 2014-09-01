@@ -54,6 +54,7 @@ func NewProvider(logger boshlog.Logger, dirProvider boshdirs.DirectoriesProvider
 	windowsCdutil := boshcd.NewCdUtil(dirProvider.SettingsDir(), fs, windowsCdrom)
 
 	compressor := boshcmd.NewTarballCompressor(runner, fs)
+	gocompressor := boshcmd.NewGoTarballCompressor(fs)
 	copier := boshcmd.NewCpCopier(runner, fs, logger)
 
 	sigarCollector := boshstats.NewSigarStatsCollector(&sigar.ConcreteSigar{})
@@ -109,6 +110,7 @@ func NewProvider(logger boshlog.Logger, dirProvider boshdirs.DirectoriesProvider
 		fs,
 		runner,
 		sigarCollector,
+		gocompressor,
 		windowsCdutil,
 		dirProvider,
 		windowsDiskManager,

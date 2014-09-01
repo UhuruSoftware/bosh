@@ -210,8 +210,11 @@ func (fs osFileSystem) Symlink(oldPath, newPath string) error {
 	//if !fs.FileExists(containingDir) {
 	//	fs.MkdirAll(containingDir, os.FileMode(0700))
 	//}
+	fs.logger.Debug(fs.logTag, "Checking newpath %s", newPath)
 	if _, err := os.Stat(newPath); err == nil {
+		fs.logger.Debug(fs.logTag, "File exists!")
 		err = os.Remove(newPath)
+		fs.logger.Debug(fs.logTag, "Deleted newpath")
 		if err != nil {
 			return bosherr.WrapError(err, "Failed to delete symlimk at %s", newPath)
 		}
@@ -224,6 +227,7 @@ func (fs osFileSystem) Symlink(oldPath, newPath string) error {
 	//return os.Symlink(oldPath, newPath)
 
 	//HACK
+	fs.logger.Debug(fs.logTag, "Initializing OLE")
 	err := ole.CoInitializeEx(0, ole.COINIT_APARTMENTTHREADED)
 	defer ole.CoUninitialize()
 
@@ -231,19 +235,21 @@ func (fs osFileSystem) Symlink(oldPath, newPath string) error {
 		return bosherr.WrapError(err, "Error initilizing OLE")
 	}
 
+	fs.logger.Debug(fs.logTag, "Creating Unknown Object")
 	unknown, errr := oleutil.CreateObject("BoshUtilities.Symlinks")
 	if errr != nil {
 		return bosherr.WrapError(errr, "Error creating object")
 	}
 
+	fs.logger.Debug(fs.logTag, "Query interface")
 	cons, errr := unknown.QueryInterface(ole.IID_IDispatch)
 	if errr != nil {
 		return bosherr.WrapError(errr, "Error creating object")
 	}
-
+	fs.logger.Debug(fs.logTag, "Call method Create Symlink")
 	_, err = oleutil.CallMethod(cons, "CreateSymLink", oldPath, newPath)
 	if err != nil {
-		return bosherr.WrapError(errr, "Error creating symlink")
+		return bosherr.WrapError(err, "Error creating symlink", err.(*ole.OleError).String())
 	}
 
 	return nil
@@ -267,13 +273,14 @@ func (fs osFileSystem) ReadLink(symlinkPath string) (targetPath string, err erro
 
 	cons, errr := unknown.QueryInterface(ole.IID_IDispatch)
 	if errr != nil {
-		err = bosherr.WrapError(errr, "Error creating object")
+		err = bosherr.WrapError(errr, "Error quering interface")
 		return
 	}
 
 	targetPathVariant, errr := oleutil.CallMethod(cons, "GetSymlinkInfo", symlinkPath)
 	if errr != nil {
-		err = bosherr.WrapError(errr, "Error creating symlink")
+
+		err = bosherr.WrapError(errr, "Error reading symlink", errr.(*ole.OleError).String())
 		return
 	}
 
